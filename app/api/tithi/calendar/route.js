@@ -1,22 +1,22 @@
 import { NextResponse } from "next/server";
 import { MoonPhase, MakeTime } from "astronomy-engine";
 
-const TITHI_NAMES = [
-    "Pratipada",
-    "Dwitiya",
-    "Tritiya",
-    "Chaturthi",
-    "Panchami",
-    "Shasthi",
-    "Saptami",
-    "Ashtami",
-    "Navami",
-    "Dashami",
-    "Ekadashi",
-    "Dwadashi",
-    "Trayodashi",
-    "Chaturdashi",
-    "Purnima/Amavasya",
+const TITHI = [
+    "1st",
+    "2nd",
+    "3rd",
+    "4th",
+    "5th",
+    "6th",
+    "7th",
+    "8th",
+    "9th",
+    "10th",
+    "11th",
+    "12th",
+    "13th",
+    "14th",
+    "15th/30th",
 ];
 
 // Helper to get geocentric elongation using the official MoonPhase API
@@ -69,15 +69,15 @@ export async function GET(request) {
                 }
 
                 const transitionDate = new Date(exactTransitionMs);
-                let paksha = prevTithiNum <= 15 ? "Shukla" : "Krishna";
+                let paksha = prevTithiNum <= 15 ? "Sud" : "Vad";
                 let relativeIdx =
                     prevTithiNum <= 15 ? prevTithiNum : prevTithiNum - 15;
                 let displayName =
                     relativeIdx === 15
                         ? prevTithiNum === 15
-                            ? "Purnima"
-                            : "Amavasya"
-                        : TITHI_NAMES[relativeIdx - 1];
+                            ? "15th"
+                            : "30th"
+                        : TITHI[relativeIdx - 1];
                 const isoString = transitionDate.toISOString();
                 tithiTransitions.push({
                     tithiNumber: prevTithiNum,
@@ -105,15 +105,15 @@ export async function GET(request) {
             const sunriseCheckDate = new Date(`${dateKey}T06:00:00Z`);
             const sunriseElongation = getElongation(sunriseCheckDate);
             const sunriseTithiNum = Math.floor(sunriseElongation / 12) + 1;
-            let paksha = sunriseTithiNum <= 15 ? "Shukla" : "Krishna";
+            let paksha = sunriseTithiNum <= 15 ? "Sud" : "Vad";
             let relativeIdx =
                 sunriseTithiNum <= 15 ? sunriseTithiNum : sunriseTithiNum - 15;
             const sunriseTithiName =
                 relativeIdx === 15
                     ? sunriseTithiNum === 15
-                        ? "Purnima"
-                        : "Amavasya"
-                    : TITHI_NAMES[relativeIdx - 1];
+                        ? "15th"
+                        : "30th"
+                    : TITHI[relativeIdx - 1];
             calendarDays.push({
                 day: d,
                 dateString: dateKey,
