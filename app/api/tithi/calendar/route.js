@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { MoonPhase, MakeTime } from "astronomy-engine";
+import SunCalc from "suncalc3";
+import { DateTime } from "luxon";
 
 const TITHI = [
     "1st",
@@ -27,16 +29,82 @@ function getElongation(jsDate) {
     return MoonPhase(astroTime);
 }
 
+async function getTimezone(latitude, longitude) {
+    const url = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`;
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`Timezone lookup failed with status ${response.status}`);
+    }
+
+    const data = await response.json();
+    const timezone =
+        data.ianaId ||
+        data.localityInfo?.informative?.find(
+            (item) => item.description === "time zone",
+        )?.name;
+    if (!timezone) {
+        throw new Error("Timezone lookup did not return a timezone for this location.");
+    }
+
+    return timezone;
+}
+
+function getSunrise(date, latitude, longitude) {
+    const sunTimes = SunCalc.getSunTimes(date, latitude, longitude);
+    const sunriseValue =
+        sunTimes.sunrise?.value ??
+        sunTimes.sunriseStart?.value ??
+        sunTimes.sunrise ??
+        sunTimes.sunriseStart;
+    const sunrise = new Date(sunriseValue);
+
+    if (Number.isNaN(sunrise.getTime())) {
+        throw new Error("A sunrise could not be calculated for this location and date.");
+    }
+
+    return sunrise;
+}
+
 export async function GET(request) {
     try {
         const { searchParams } = new URL(request.url);
         const now = new Date();
         const year = parseInt(searchParams.get("year")) || now.getFullYear();
         const month = parseInt(searchParams.get("month")) || now.getMonth() + 1;
+        const latitudeParam = searchParams.get("latitude");
+        const longitudeParam = searchParams.get("longitude");
+        const hasCoordinates =
+            latitudeParam !== null || longitudeParam !== null;
+        const latitude = Number(latitudeParam);
+        const longitude = Number(longitudeParam);
+
+        if (
+            hasCoordinates &&
+            (latitudeParam === null ||
+                longitudeParam === null ||
+                !Number.isFinite(latitude) ||
+                latitude < -90 ||
+                latitude > 90 ||
+                !Number.isFinite(longitude) ||
+                longitude < -180 ||
+                longitude > 180)
+        ) {
+            return NextResponse.json(
+                { success: false, error: "Valid latitude and longitude are required." },
+                { status: 400 },
+            );
+        }
+
+        const timezone = hasCoordinates
+            ? await getTimezone(latitude, longitude)
+            : "UTC";
         const tithiTransitions = [];
-        // Establish month boundaries in UTC
-        const startJsDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
-        const endJsDate = new Date(Date.UTC(year, month, 1, 0, 0, 0));
+        const monthStart = DateTime.fromObject(
+            { year, month, day: 1 },
+            { zone: timezone },
+        ).startOf("day");
+        const startJsDate = monthStart.toUTC().toJSDate();
+        const endJsDate = monthStart.plus({ months: 1 }).toUTC().toJSDate();
         let currentCheckMs = startJsDate.getTime();
         const endCheckMs = endJsDate.getTime();
         // Scan month in 2-hour increments to locate transition crossings
@@ -69,6 +137,9 @@ export async function GET(request) {
                 }
 
                 const transitionDate = new Date(exactTransitionMs);
+                const localTransitionDate = DateTime.fromJSDate(
+                    transitionDate,
+                ).setZone(timezone);
                 let paksha = prevTithiNum <= 15 ? "Sud" : "Vad";
                 let relativeIdx =
                     prevTithiNum <= 15 ? prevTithiNum : prevTithiNum - 15;
@@ -83,7 +154,8 @@ export async function GET(request) {
                     tithiNumber: prevTithiNum,
                     name: `${paksha} ${displayName}`,
                     endTime: isoString,
-                    dateKey: isoString.split("T")[0], // Safely extracts "YYYY-MM-DD" string
+                    dateKey: localTransitionDate.toFormat("yyyy-MM-dd"),
+                    localTime: localTransitionDate.toFormat("hh:mm a"),
                 });
             }
 
@@ -101,8 +173,16 @@ export async function GET(request) {
             const endsToday = tithiTransitions.filter(
                 (t) => t.dateKey === dateKey,
             );
-            // Sunrise check (6:00 AM UTC baseline evaluation)
-            const sunriseCheckDate = new Date(`${dateKey}T06:00:00Z`);
+            const sunriseCheckDate = hasCoordinates
+                ? getSunrise(
+                      DateTime.fromObject(
+                          { year, month, day: d, hour: 12 },
+                          { zone: timezone },
+                      ).toJSDate(),
+                      latitude,
+                      longitude,
+                  )
+                : new Date(`${dateKey}T06:00:00Z`);
             const sunriseElongation = getElongation(sunriseCheckDate);
             const sunriseTithiNum = Math.floor(sunriseElongation / 12) + 1;
             let paksha = sunriseTithiNum <= 15 ? "Sud" : "Vad";
@@ -120,10 +200,7 @@ export async function GET(request) {
                 sunriseTithi: `${paksha} ${sunriseTithiName}`,
                 transitions: endsToday.map((t) => ({
                     name: t.name,
-                    time: new Date(t.endTime).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                    }),
+                    time: t.localTime,
                 })),
             });
         }

@@ -9,10 +9,14 @@
   },
   "dependencies": {
     "astronomy-engine": "^2.1.19",
-    "next": "16.4.3",
+    "latest": "^0.2.0",
+    "luxon": "^3.7.2",
+    "next": "16.4.6",
+    "next.js": "^1.0.3",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "react-icons": "^5.7.0"
+    "react-icons": "^5.7.0",
+    "suncalc3": "^2.0.5"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
