@@ -7,6 +7,7 @@ export default function CalendarPage() {
     const [daysData, setDaysData] = useState([]);
     const [loading, setLoading] = useState(true);
     const [errorMsg, setErrorMsg] = useState(null);
+    const [calendarTimezone, setCalendarTimezone] = useState("UTC");
     const [selectedDay, setSelectedDay] = useState(null);
     const [address, setAddress] = useState("");
     const [suggestions, setSuggestions] = useState([]);
@@ -43,13 +44,19 @@ export default function CalendarPage() {
                     signal: controller.signal,
                 });
                 const data = await res.json();
-                if (!res.ok || !data.success || !Array.isArray(data.days)) {
+                if (
+                    !res.ok ||
+                    !data.success ||
+                    !Array.isArray(data.days) ||
+                    typeof data.timezone !== "string"
+                ) {
                     throw new Error(
                         data.error ||
                             `Calendar request failed with status ${res.status}.`,
                     );
                 }
                 setDaysData(data.days);
+                setCalendarTimezone(data.timezone);
             } catch (err) {
                 if (err.name !== "AbortError") {
                     console.error("Critical fetching issue:", err);
@@ -160,6 +167,7 @@ export default function CalendarPage() {
     const [loadingChoghadiya, setLoadingChoghadiya] = useState(false);
     const [choghadiyaError, setChoghadiyaError] = useState(null);
     const [activeTimeline, setActiveTimeline] = useState("day");
+    const [currentTimeMs, setCurrentTimeMs] = useState(null);
 
     useEffect(() => {
         if (!selectedDay || !selectedDay.dateString || !selectedLocation) {
@@ -204,6 +212,18 @@ export default function CalendarPage() {
         return () => controller.abort();
     }, [selectedDay, selectedLocation]);
 
+    useEffect(() => {
+        if (!selectedDay?.dateString) {
+            setCurrentTimeMs(null);
+            return;
+        }
+
+        const updateCurrentTime = () => setCurrentTimeMs(Date.now());
+        updateCurrentTime();
+        const intervalId = setInterval(updateCurrentTime, 15_000);
+        return () => clearInterval(intervalId);
+    }, [selectedDay?.dateString]);
+
     const monthNames = [
         "January",
         "February",
@@ -227,7 +247,20 @@ export default function CalendarPage() {
         );
     }
 
-    function SlotCard({ slot, index }) {
+    const todayAtLocation = new Intl.DateTimeFormat("en-US", {
+        timeZone: calendarTimezone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    })
+        .formatToParts(new Date())
+        .reduce((date, part) => {
+            if (part.type !== "literal") date[part.type] = part.value;
+            return date;
+        }, {});
+    const todayDateString = `${todayAtLocation.year}-${todayAtLocation.month}-${todayAtLocation.day}`;
+
+    function SlotCard({ slot, index, isActive }) {
         if (!slot) return null;
 
         // Extract properties safely based on API shape variants
@@ -257,18 +290,15 @@ export default function CalendarPage() {
 
         return (
             <div
-                className={`p-3 rounded-lg border flex flex-col justify-between transition-all hover:shadow-sm ${bgStyles}`}
+                className={`p-3 rounded-lg border flex flex-col justify-between transition-all hover:shadow-sm ${bgStyles} ${isActive ? "animate-pulse ring-2 ring-amber-400 shadow-lg shadow-amber-500/30" : ""}`}
             >
                 <div className="flex items-center justify-between mb-1">
-                    <span className="font-bold text-base tracking-wide">
-                        {name}
+                    <span className="font-bold text-[13px] tracking-wide">
+                        {name} - {nature}
                     </span>
-                    <span className="text-[10px] uppercase font-semibold opacity-75">
-                        Slot {slot.number || index}
+                    <span className="text-[12px] uppercase font-semibold opacity-75">
+                        {start} - {end}
                     </span>
-                </div>
-                <div className="text-xs opacity-90 font-medium">
-                    {start} - {end}
                 </div>
             </div>
         );
@@ -437,6 +467,7 @@ export default function CalendarPage() {
 
                         {/* Main Grid Mapping Pass Loop */}
                         {daysData.map((item, index) => {
+                            const isToday = item.dateString === todayDateString;
                             const localString = `${year}-${String(month).padStart(2, "0")}-${String(item.day).padStart(2, "0")}`;
                             const dateObj = new Date(localString + "T00:00:00");
                             const dayName = !isNaN(dateObj)
@@ -545,6 +576,16 @@ export default function CalendarPage() {
                                     key={item.day}
                                     onClick={() => setSelectedDay(item)}
                                     className={`${isWaxing ? "bg-slate-400 text-slate-900 hover:bg-slate-900" : "bg-slate-900 text-white hover:bg-slate-400"} border text-left rounded-xl p-2 sm:p-3 min-h-24 sm:min-h-32.5 flex flex-col justify-between transition-all hover:border-amber-500/50 active:scale-[0.98]`}
+                                    style={
+                                        isToday
+                                            ? {
+                                                  transform: "scale(1.1)",
+                                                  animation: "pulse 2s infinite alternate",
+                                                  transition: "all 0.3s ease-in-out",
+                                                  zIndex: 1,
+                                              }
+                                            : undefined
+                                    }
                                 >
                                     <div className="flex flex-col items-center justify-center text-center w-full gap-2 pt-1">
                                         <span
@@ -795,13 +836,31 @@ export default function CalendarPage() {
                                             activeTimeline === "day"
                                                 ? "dayTimeline"
                                                 : "nightTimeline"
-                                        ].map((slot, index) => (
-                                            <SlotCard
-                                                key={`${activeTimeline}-${index}`}
-                                                slot={slot}
-                                                index={index + 1}
-                                            />
-                                        ))
+                                        ].map((slot, index) => {
+                                            const startMs = Date.parse(
+                                                slot.rawStart,
+                                            );
+                                            const endMs = Date.parse(
+                                                slot.rawEnd,
+                                            );
+                                            const isActive =
+                                                selectedDay.dateString ===
+                                                    todayDateString &&
+                                                currentTimeMs !== null &&
+                                                Number.isFinite(startMs) &&
+                                                Number.isFinite(endMs) &&
+                                                currentTimeMs >= startMs &&
+                                                currentTimeMs < endMs;
+
+                                            return (
+                                                <SlotCard
+                                                    key={`${activeTimeline}-${index}`}
+                                                    slot={slot}
+                                                    index={index + 1}
+                                                    isActive={isActive}
+                                                />
+                                            );
+                                        })
                                     ) : (
                                         <div className="col-span-full text-xs font-mono text-slate-500 italic bg-slate-950/40 p-4 rounded-xl text-center border border-dashed border-slate-800">
                                             {selectedLocation

@@ -209,6 +209,7 @@ export async function GET(request) {
             success: true,
             year,
             month,
+            timezone,
             days: calendarDays,
         });
     } catch (error) {
